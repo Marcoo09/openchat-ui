@@ -1,6 +1,4 @@
 import { NextApiRequest, NextApiResponse } from 'next';
-
-import { OPENAI_API_HOST } from '@/utils/app/const';
 import { cleanSourceText } from '@/utils/server/google';
 
 import { Message } from '@/types/chat';
@@ -12,7 +10,7 @@ import jsdom, { JSDOM } from 'jsdom';
 
 const handler = async (req: NextApiRequest, res: NextApiResponse<any>) => {
   try {
-    const { messages, key, model, googleAPIKey, googleCSEId } =
+    const { messages, model, googleAPIKey, googleCSEId } =
       req.body as GoogleBody;
 
     const userMessage = messages[messages.length - 1];
@@ -49,7 +47,6 @@ const handler = async (req: NextApiRequest, res: NextApiResponse<any>) => {
             timeoutPromise,
           ])) as any;
 
-          // if (res) {
           const html = await res.text();
 
           const virtualConsole = new jsdom.VirtualConsole();
@@ -65,14 +62,8 @@ const handler = async (req: NextApiRequest, res: NextApiResponse<any>) => {
 
           if (parsed) {
             let sourceText = cleanSourceText(parsed.textContent);
-
-            return {
-              ...source,
-              // TODO: switch to tokens
-              text: sourceText.slice(0, 2000),
-            } as GoogleSource;
+            return { ...source, text: sourceText.slice(0, 2000) } as GoogleSource;
           }
-          // }
 
           return null;
         } catch (error) {
@@ -87,62 +78,64 @@ const handler = async (req: NextApiRequest, res: NextApiResponse<any>) => {
     const answerPrompt = endent`
     Provide me with the information I requested. Use the sources to provide an accurate response. Respond in markdown format. Cite the sources you used as a markdown link as you use them at the end of each sentence by number of the source (ex: [[1]](link.com)). Provide an accurate response and then stop. Today's date is ${new Date().toLocaleDateString()}.
 
-    Example Input:
-    What's the weather in San Francisco today?
-
-    Example Sources:
-    [Weather in San Francisco](https://www.google.com/search?q=weather+san+francisco)
-
-    Example Response:
-    It's 70 degrees and sunny in San Francisco today. [[1]](https://www.google.com/search?q=weather+san+francisco)
-
     Input:
     ${userMessage.content.trim()}
 
     Sources:
-    ${filteredSources.map((source) => {
-      return endent`
-      ${source.title} (${source.link}):
-      ${source.text}
-      `;
-    })}
+    ${filteredSources
+      .map(
+        (source) => endent`
+        ${source.title} (${source.link}):
+        ${source.text}
+      `,
+      )
+      .join('\n\n')}
 
     Response:
     `;
 
     const answerMessage: Message = { role: 'user', content: answerPrompt };
 
-    const answerRes = await fetch(`${OPENAI_API_HOST}/v1/chat/completions`, {
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${key ? key : process.env.OPENAI_API_KEY}`,
-        ...(process.env.OPENAI_ORGANIZATION && {
-          'OpenAI-Organization': process.env.OPENAI_ORGANIZATION,
-        }),
-      },
+    const answerRes = await fetch('http://localhost:8000/chat', {
+      headers: { 'Content-Type': 'application/json' },
       method: 'POST',
       body: JSON.stringify({
-        model: model.id,
+        model,
         messages: [
           {
             role: 'system',
-            content: `Use the sources to provide an accurate response. Respond in markdown format. Cite the sources you used as [1](link), etc, as you use them. Maximum 4 sentences.`,
+            content: `Use the sources to provide an accurate response. Respond in markdown format. Cite the sources you used as [1](link), etc. Maximum 4 sentences.`,
           },
           answerMessage,
         ],
-        max_tokens: 1000,
         temperature: 1,
-        stream: false,
       }),
     });
 
-    const { choices: choices2 } = await answerRes.json();
-    const answer = choices2[0].message.content;
+    const reader = answerRes.body?.getReader();
+    let fullText = '';
+
+    if (reader) {
+      const decoder = new TextDecoder();
+      let done = false;
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        if (value) {
+          fullText += decoder.decode(value);
+        }
+        done = readerDone;
+      }
+    }
+
+    // The backend already streams SSE JSON chunks, so we need to parse
+    const lastChunk = fullText.split('\n\n').filter((c) => c.startsWith('data: ')).pop();
+    const parsed = lastChunk && JSON.parse(lastChunk.replace('data: ', ''));
+    const answer = parsed?.choices?.[0]?.delta?.content || 'No answer.';
 
     res.status(200).json({ answer });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Error'})
+    res.status(500).json({ error: 'Error 3' });
   }
 };
 

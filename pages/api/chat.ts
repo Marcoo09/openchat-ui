@@ -1,8 +1,5 @@
 import { DEFAULT_SYSTEM_PROMPT, DEFAULT_TEMPERATURE } from '@/utils/app/const';
-import { OpenAIError, OpenAIStream } from '@/utils/server';
-
 import { ChatBody, Message } from '@/types/chat';
-
 import llamaTokenizer from 'llama-tokenizer-js';
 
 export const config = {
@@ -11,17 +8,11 @@ export const config = {
 
 const handler = async (req: Request): Promise<Response> => {
   try {
-    const { model, messages, key, prompt, temperature } = (await req.json()) as ChatBody;
+    console.log('here', req)
+    const { model, messages, prompt, temperature } = (await req.json()) as ChatBody;
 
-    let promptToSend = prompt;
-    if (!promptToSend) {
-      promptToSend = DEFAULT_SYSTEM_PROMPT;
-    }
-
-    let temperatureToUse = temperature;
-    if (temperatureToUse == null) {
-      temperatureToUse = DEFAULT_TEMPERATURE;
-    }
+    let promptToSend = prompt || DEFAULT_SYSTEM_PROMPT;
+    let temperatureToUse = temperature ?? DEFAULT_TEMPERATURE;
 
     const prompt_tokens = llamaTokenizer.encode(promptToSend, false);
 
@@ -39,16 +30,29 @@ const handler = async (req: Request): Promise<Response> => {
       messagesToSend = [message, ...messagesToSend];
     }
 
-    const stream = await OpenAIStream(model, promptToSend, temperatureToUse, key, messagesToSend);
+    // Call your local FastAPI backend instead of OpenAI
+    const response = await fetch('http://localhost:8000/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: messagesToSend,
+        prompt: promptToSend,
+        temperature: temperatureToUse,
+      }),
+    });
 
-    return new Response(stream);
+    if (!response.ok) {
+      throw new Error(`Local API returned ${response.status}`);
+    }
+
+    // Pass through the stream directly
+    return new Response(response.body, {
+      headers: { 'Content-Type': 'text/event-stream' },
+    });
   } catch (error) {
     console.error(error);
-    if (error instanceof OpenAIError) {
-      return new Response('Error', { status: 500, statusText: error.message });
-    } else {
-      return new Response('Error', { status: 500 });
-    }
+    return new Response('Error 1', { status: 500 });
   }
 };
 
