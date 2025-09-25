@@ -12,8 +12,8 @@ export enum OpenAIModelID {
   OPENCHAT = 'OpenChat',
   OPENCHAT_8192 = 'OpenChat-8192',
 
-  OPENCHAT3_1 = 'openchat_v3.1_llama2',
-  OPENCHAT3_2 = 'openchat_v3.2',
+  OPENCHAT3_1 = 'llama3.1',
+  OPENCHAT3_2 = 'llama3.1',
 
   OPENCODER = 'OpenCoder'
 }
